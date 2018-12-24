@@ -6,7 +6,9 @@ extern crate rand;
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 use pairing::{Engine, Field, PrimeField};
 
-mod cube; 
+mod cube;
+mod multiply;
+mod testing_cs;
 
 fn main(){
     use pairing::bls12_381::{Bls12, Fr};
