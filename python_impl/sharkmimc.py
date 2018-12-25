@@ -37,11 +37,11 @@ class Sharkmimc:
         self.matrix_2 = [[fq_1]*self.num_branches]*self.num_branches
 
     def gen_round_constants(self):
-        for _ in range((self.middle_rounds + 6) * self.num_branches):
+        for _ in range(self.total_rounds * self.num_branches):
             self.round_constants.append(fq_1)
 
     def gen_round_keys(self):
-        for _ in range((self.middle_rounds + 7) * self.num_branches):
+        for _ in range((self.total_rounds + 1) * self.num_branches):
             self.round_keys.append(fq_1)
 
     @staticmethod
@@ -125,10 +125,15 @@ if __name__== "__main__":
     h1 = hash_to_point_Fq('1')
     h2 = hash_to_point_Fq('2')
 
-    input = [h1.x, h1.y, h2.x, h2.y]
+    # input = [h1.x, h1.y, h2.x, h2.y]
+    input = [1, 2, 3, 4]
+    print('Input >>>>>>>>>')
+    print(input)
 
+    print('Cube >>>>>>>>>')
     hf_cube = SharkmimcCube()
     print(hf_cube.hash(input))
 
+    print('Inverse >>>>>>>>>')
     hf_inv = SharkmimcInverse()
     print(hf_inv.hash(input))

@@ -9,6 +9,7 @@ use pairing::{Engine, Field, PrimeField};
 mod cube;
 mod multiply;
 mod testing_cs;
+mod sharkmimc;
 
 fn main(){
     use pairing::bls12_381::{Bls12, Fr};
