@@ -132,8 +132,8 @@ if __name__== "__main__":
 
     print('Cube >>>>>>>>>')
     hf_cube = SharkmimcCube()
-    print(hf_cube.hash(input))
+    print(list(map(int, hf_cube.hash(input))))
 
     print('Inverse >>>>>>>>>')
     hf_inv = SharkmimcInverse()
-    print(hf_inv.hash(input))
+    print(list(map(int, hf_inv.hash(input))))
