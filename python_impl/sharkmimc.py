@@ -67,7 +67,7 @@ class Sharkmimc:
                     temp = self.matrix_2[i][j] * value_branch[j]
                     value_branch_temp[i] += temp
 
-            value_branch = value_branch_temp
+            value_branch = value_branch_temp[:]
             value_branch_temp = [fq_0] * self.num_branches
 
         for _ in range(self.middle_rounds):
@@ -82,7 +82,7 @@ class Sharkmimc:
                     temp = self.matrix_2[i][j] * value_branch[j]
                     value_branch_temp[i] += temp
 
-            value_branch = value_branch_temp
+            value_branch = value_branch_temp[:]
             value_branch_temp = [fq_0] * self.num_branches
 
         for _ in range(2):
@@ -96,7 +96,7 @@ class Sharkmimc:
                     temp = self.matrix_2[i][j] * value_branch[j]
                     value_branch_temp[i] += temp
 
-            value_branch = value_branch_temp
+            value_branch = value_branch_temp[:]
 
         for i in range(self.num_branches):
             value_branch[i] = value_branch[i] + self.round_keys[round_keys_offset]

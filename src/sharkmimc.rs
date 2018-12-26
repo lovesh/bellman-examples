@@ -78,23 +78,133 @@ impl<E: Engine> SharkMiMCParams<E> {
     }
 }
 
-pub trait Sbox<E: Engine> {
-    fn apply(elem: &E::Fr) -> E::Fr;
+fn SharkMiMC<E: Engine>(
+    input: Vec<E::Fr>,
+    params: &SharkMiMCParams<E>
+) -> Vec<E::Fr>
+{
+    assert_eq!(input.len(), params.num_branches);
+
+    fn apply_sbox<E: Engine>(
+        elem: &E::Fr
+    ) -> E::Fr
+    {
+        let mut res = E::Fr::one();
+        res.mul_assign(elem);
+        res.mul_assign(elem);
+        res.mul_assign(elem);
+        res
+    }
+
+    let mut value_branch = input;
+    let mut value_branch_temp = vec![E::Fr::zero(); params.num_branches];
+
+    let mut round_keys_offset = 0;
+
+    // 3 full Sbox rounds
+    for _ in 0..3 {
+        // Sbox layer
+        for i in 0..params.num_branches {
+            value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
+            value_branch[i] = apply_sbox::<E>(&value_branch[i]);
+            round_keys_offset += 1;
+        }
+
+        // linear layer
+        for j in 0..params.num_branches {
+            for i in 0..params.num_branches {
+                let mut temp = value_branch[j].clone();
+                temp.mul_assign(&params.matrix_2[i][j]);
+                value_branch_temp[i].add_assign(&temp);
+            }
+        }
+
+        // Output of this round becomes input to next round
+        for i in 0..params.num_branches {
+            value_branch[i] = value_branch_temp[i];
+            value_branch_temp[i] = E::Fr::zero();
+        }
+    }
+
+    // middle partial Sbox rounds
+    for _ in 3..(3+params.middle_rounds) {
+        for i in 0..params.num_branches {
+            value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
+            round_keys_offset += 1;
+        }
+
+        // partial Sbox layer
+        value_branch[0] = apply_sbox::<E>(&value_branch[0]);
+
+        // linear layer
+        for j in 0..params.num_branches {
+            for i in 0..params.num_branches {
+                let mut temp = value_branch[j].clone();
+                temp.mul_assign(&params.matrix_2[i][j]);
+                value_branch_temp[i].add_assign(&temp);
+            }
+        }
+
+        // Output of this round becomes input to next round
+        for i in 0..params.num_branches {
+            value_branch[i] = value_branch_temp[i];
+            value_branch_temp[i] = E::Fr::zero();
+        }
+    }
+
+    // last full Sbox rounds
+    for _ in 3+params.middle_rounds..(3+params.middle_rounds+2) {
+        // Sbox layer
+        for i in 0..params.num_branches {
+            value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
+            value_branch[i] = apply_sbox::<E>(&value_branch[i]);
+            round_keys_offset += 1;
+        }
+
+        // linear layer
+        for j in 0..params.num_branches {
+            for i in 0..params.num_branches {
+                let mut temp = value_branch[j].clone();
+                temp.mul_assign(&params.matrix_2[i][j]);
+                value_branch_temp[i].add_assign(&temp);
+            }
+        }
+
+        // Output of this round becomes input to next round
+        for i in 0..params.num_branches {
+            value_branch[i] = value_branch_temp[i];
+        }
+    }
+
+    for i in 0..params.num_branches {
+        value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
+        value_branch[i] = apply_sbox::<E>(&value_branch[i]);
+        round_keys_offset += 1;
+
+        value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
+        round_keys_offset += 1;
+    }
+
+    value_branch
 }
 
+/*pub trait Sbox<E: Engine> {
+    fn apply(elem: &E::Fr) -> E::Fr;
+}*/
+
 // Circuit for proving knowledge of the preimage of a SharkMiMC hash.
-struct SharkMiMC<'a, E: Engine> {
+struct SharkMiMCCircuit<'a, E: Engine> {
     pub input: Vec<Option<E::Fr>>,
     params: &'a SharkMiMCParams<E>
 }
 
-impl<'a, E: Engine> SharkMiMC<'a, E> {
+/*impl<'a, E: Engine> SharkMiMCCircuit<'a, E> {
     fn applySbox(elem: &E::Fr) -> E::Fr {
         elem.clone()
     }
-}
+}*/
 
-impl<'a, E: Engine> Circuit<E> for SharkMiMC<'a, E> {
+impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
     fn synthesize<CS: ConstraintSystem<E>>(
         self,
         cs: &mut CS
@@ -167,7 +277,6 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMC<'a, E> {
             // Linear layer
 
             let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
-            let mut next_input_vars: Vec<Variable> = vec![CS::one(); num_branches];
 
             for j in 0..num_branches {
                 for i in 0..num_branches {
@@ -251,7 +360,6 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMC<'a, E> {
             // Linear layer
 
             let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
-            let mut next_input_vars: Vec<Variable> = vec![CS::one(); num_branches];
 
             for j in 0..num_branches {
                 for i in 0..num_branches {
@@ -281,6 +389,8 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMC<'a, E> {
         // ------------ Last 2+1 rounds begin --------------------
 
         // 2 rounds
+        let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
+
         for k in 3+self.params.middle_rounds..(3+self.params.middle_rounds+2) {
             let mut sbox_out_vals: Vec<Option<E::Fr>> = vec![None; num_branches];
 
@@ -330,9 +440,6 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMC<'a, E> {
             }
 
             // Linear layer
-
-            let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
-            let mut next_input_vars: Vec<Variable> = vec![CS::one(); num_branches];
 
             for j in 0..num_branches {
                 for i in 0..num_branches {
@@ -438,13 +545,23 @@ fn test_SharkMiMC1() {
 //    let j = Fr::Repr::from(k);
     let input = vec![Fr::from_str("1"), Fr::from_str("2"),
                      Fr::from_str("3"), Fr::from_str("4")];
-
+    println!("Input >>>>>>>>>");
     println!("{:?}", input[0]);
     println!("{:?}", input[1]);
     println!("{:?}", input[2]);
     println!("{:?}", input[3]);
 
-    let c = SharkMiMC::<Bls12> {
+    let mut input1 = vec![Fr::zero(); num_branches];
+    for i in 0..num_branches {
+        input1[i] = input[i].clone().unwrap();
+    }
+    let image_from_func = SharkMiMC::<Bls12>(input1, &s_params);
+    println!("Output (from function) >>>>>>>>>");
+    for i in 0..num_branches {
+        println!("{}", image_from_func[i]);
+    }
+
+    let c = SharkMiMCCircuit::<Bls12> {
         input,
         params: &s_params
     };
@@ -455,10 +572,14 @@ fn test_SharkMiMC1() {
     println!("Num constraints {}", &cs.num_constraints());
     println!("Is satisfied {}", &cs.is_satisfied());
 //    println!("{}", &cs.pretty_print());
+    let mut image_from_circuit = vec![Fr::zero(); num_branches];
+
     for i in 0..num_branches {
-        println!("Output {}:{}", i, &cs.get(&format!("sbox: round-branch: {}:{}/image", total_rounds-1, i)));
+        image_from_circuit[i] = cs.get(&format!("sbox: round-branch: {}:{}/image", total_rounds-1, i));
+        println!("Output {}:{}", i, &image_from_circuit[i]);
     }
 
+    assert_eq!(image_from_func, image_from_circuit);
 }
 
 #[test]
@@ -473,7 +594,7 @@ fn test_SharkMiMC() {
     let s_params = SharkMiMCParams::<Bls12>::new(num_branches, middle_rounds);
 
     let params = {
-        let c = SharkMiMC::<Bls12> {
+        let c = SharkMiMCCircuit::<Bls12> {
             input: vec![None; num_branches],
             params: &s_params
         };
@@ -486,7 +607,7 @@ fn test_SharkMiMC() {
     let pvk = prepare_verifying_key(&params.vk);
 
     // Input and output generated from python implementation (sharkmimc.py)
-    let circuit = SharkMiMC::<Bls12> {
+    let circuit = SharkMiMCCircuit::<Bls12> {
         input: vec![Fr::from_str("1"), Fr::from_str("2"),
                     Fr::from_str("3"), Fr::from_str("4")],
         params: &s_params
