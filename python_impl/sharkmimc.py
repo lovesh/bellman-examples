@@ -129,11 +129,14 @@ if __name__== "__main__":
     input = [1, 2, 3, 4]
     print('Input >>>>>>>>>')
     print(input)
+    print([to_bls12_elem(i) for i in input])
 
-    print('Cube >>>>>>>>>')
+    print('Output when Sbox is Cube >>>>>>>>>')
     hf_cube = SharkmimcCube()
-    print(list(map(int, hf_cube.hash(input))))
+    print('Hex:', hf_cube.hash(input))
+    print('Decimal:', list(map(int, hf_cube.hash(input))))
 
-    print('Inverse >>>>>>>>>')
+    print('Output when Sbox is Inverse >>>>>>>>>')
     hf_inv = SharkmimcInverse()
-    print(list(map(int, hf_inv.hash(input))))
+    print('Hex:', hf_inv.hash(input))
+    print('Decimal:', list(map(int, hf_inv.hash(input))))

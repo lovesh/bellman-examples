@@ -424,6 +424,44 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMC<'a, E> {
 
 
 #[test]
+fn test_SharkMiMC1() {
+    use pairing::bls12_381::{Bls12, Fr, FrRepr};
+    use pairing::{PrimeField, PrimeFieldRepr};
+    use testing_cs::TestConstraintSystem;
+
+    let mut cs = TestConstraintSystem::<Bls12>::new();
+
+    let num_branches = 4;
+    let middle_rounds = 38;
+    let s_params = SharkMiMCParams::<Bls12>::new(num_branches, middle_rounds);
+    let k = u64::from(1 as u32);
+//    let j = Fr::Repr::from(k);
+    let input = vec![Fr::from_str("1"), Fr::from_str("2"),
+                     Fr::from_str("3"), Fr::from_str("4")];
+
+    println!("{:?}", input[0]);
+    println!("{:?}", input[1]);
+    println!("{:?}", input[2]);
+    println!("{:?}", input[3]);
+
+    let c = SharkMiMC::<Bls12> {
+        input,
+        params: &s_params
+    };
+
+    let total_rounds = c.params.total_rounds;
+
+    c.synthesize(&mut cs).unwrap();
+    println!("Num constraints {}", &cs.num_constraints());
+    println!("Is satisfied {}", &cs.is_satisfied());
+//    println!("{}", &cs.pretty_print());
+    for i in 0..num_branches {
+        println!("Output {}:{}", i, &cs.get(&format!("sbox: round-branch: {}:{}/image", total_rounds-1, i)));
+    }
+
+}
+
+#[test]
 fn test_SharkMiMC() {
     use pairing::bls12_381::{Bls12, Fr};
     use pairing::PrimeField;
