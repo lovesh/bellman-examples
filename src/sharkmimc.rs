@@ -173,6 +173,7 @@ fn SharkMiMC<E: Engine>(
         // Output of this round becomes input to next round
         for i in 0..params.num_branches {
             value_branch[i] = value_branch_temp[i];
+            value_branch_temp[i] = E::Fr::zero();
         }
     }
 
@@ -389,8 +390,6 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
         // ------------ Last 2+1 rounds begin --------------------
 
         // 2 rounds
-        let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
-
         for k in 3+self.params.middle_rounds..(3+self.params.middle_rounds+2) {
             let mut sbox_out_vals: Vec<Option<E::Fr>> = vec![None; num_branches];
 
@@ -440,6 +439,8 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
             }
 
             // Linear layer
+
+            let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
 
             for j in 0..num_branches {
                 for i in 0..num_branches {
@@ -569,8 +570,10 @@ fn test_SharkMiMC1() {
     let total_rounds = c.params.total_rounds;
 
     c.synthesize(&mut cs).unwrap();
+    let satisfied = cs.is_satisfied();
+    assert!(satisfied);
+    println!("Is satisfied {}", satisfied);
     println!("Num constraints {}", &cs.num_constraints());
-    println!("Is satisfied {}", &cs.is_satisfied());
 //    println!("{}", &cs.pretty_print());
     let mut image_from_circuit = vec![Fr::zero(); num_branches];
 
@@ -580,6 +583,7 @@ fn test_SharkMiMC1() {
     }
 
     assert_eq!(image_from_func, image_from_circuit);
+    println!("{}", cs.find_unconstrained());
 }
 
 #[test]
@@ -616,10 +620,10 @@ fn test_SharkMiMC() {
     let proof = create_random_proof(circuit, &params, rng).unwrap();
 
     let image: Vec<Fr> = vec![
-        Fr::from_str("67467530373502753752924860171790442231048313900282686261343205429092560401206073946299845046733797859154502122857").unwrap(),
-        Fr::from_str("762128189513891820312535132127527487877314215797849354999559120718946811992864139948058805671503493721069958513709").unwrap(),
-        Fr::from_str("994431830302227569593741217325868538797115453206571284864030749113203138226634657912641665782834572234751139919329").unwrap(),
-        Fr::from_str("3903970509687998100224236216689220321329382292912982132882363870929206722842112920590656441858573865007030514464078").unwrap()
+        Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
+        Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
+        Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
+        Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap()
     ];
     assert!(verify_proof(&pvk, &proof, &image).unwrap());
 }

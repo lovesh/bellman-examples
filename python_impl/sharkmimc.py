@@ -97,6 +97,7 @@ class Sharkmimc:
                     value_branch_temp[i] += temp
 
             value_branch = value_branch_temp[:]
+            value_branch_temp = [fq_0] * self.num_branches
 
         for i in range(self.num_branches):
             value_branch[i] = value_branch[i] + self.round_keys[round_keys_offset]

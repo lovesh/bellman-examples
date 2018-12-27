@@ -14,7 +14,7 @@ use bellman::{
     Circuit
 };
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 //use byteorder::{BigEndian, ByteOrder};
@@ -255,6 +255,53 @@ impl<E: Engine> TestConstraintSystem<E> {
         s
     }*/
 
+    pub fn find_unconstrained(&self) -> String {
+        let mut s = String::new();
+        let pp = |hm: & mut HashSet<String>, lc: &LinearCombination<E>| {
+            for (var, coeff) in proc_lc::<E>(lc.as_ref()) {
+                match var.0.get_unchecked() {
+                    Index::Input(i) => {
+                        let v = self.inputs[i].clone();
+                        hm.insert(v.1);
+                    },
+                    Index::Aux(i) => {
+                        let v = self.aux[i].clone();
+                        hm.insert(v.1);
+                    }
+                }
+            }
+        };
+
+        let i_max = self.constraints.len();
+
+        let mut set = HashSet::new();
+        for &(ref a, ref b, ref c, ref _name) in &self.constraints {
+
+            pp(&mut set, a);
+            pp(&mut set, b);
+            pp(&mut set, c);
+        }
+
+        for inp in self.inputs.iter() {
+            if set.get(&inp.1).is_none() {
+                write!(&mut s, "\n").unwrap();
+                write!(&mut s, "{}", inp.1).unwrap();
+                write!(&mut s, "\n").unwrap();
+            }
+        }
+
+        for inp in self.aux.iter() {
+            if set.get(&inp.1).is_none() {
+                write!(&mut s, "\n").unwrap();
+                write!(&mut s, "{}", inp.1).unwrap();
+                write!(&mut s, "\n").unwrap();
+            }
+        }
+
+        s
+    }
+
+
     pub fn which_is_unsatisfied(&self) -> Option<&str> {
         for &(ref a, ref b, ref c, ref path) in &self.constraints {
             let mut a = eval_lc::<E>(a.as_ref(), &self.inputs, &self.aux);
@@ -477,7 +524,6 @@ fn test_cs() {
 
     assert!(!cs.is_satisfied());
     assert!(cs.which_is_unsatisfied() == Some("mult"));
-
     assert!(cs.get("product") == Fr::from_str("40").unwrap());
 
     cs.set("product", Fr::from_str("16").unwrap());
