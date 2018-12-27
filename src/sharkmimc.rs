@@ -78,23 +78,43 @@ impl<E: Engine> SharkMiMCParams<E> {
     }
 }
 
+fn apply_cube_sbox<E: Engine>(elem: &E::Fr) -> E::Fr
+{
+    let mut res = E::Fr::one();
+    res.mul_assign(elem);
+    res.mul_assign(elem);
+    res.mul_assign(elem);
+    res
+}
+
+fn apply_inverse_sbox<E: Engine>(elem: &E::Fr) -> E::Fr
+{
+    elem.inverse().map_or(E::Fr::zero(), | t | t)
+}
+
+pub trait HasSbox<E: Engine> {
+    fn apply_sbox(elem: &E::Fr) -> E::Fr;
+}
+
+pub trait HasCubeSbox<E: Engine>: HasSbox<E> {
+    fn apply_sbox(elem: &E::Fr) -> E::Fr {
+        apply_cube_sbox::<E>(elem)
+    }
+}
+
+pub trait HasInverseSbox<E: Engine>: HasSbox<E> {
+    fn apply_sbox(elem: &E::Fr) -> E::Fr {
+        apply_inverse_sbox::<E>(elem)
+    }
+}
+
 fn SharkMiMC<E: Engine>(
     input: Vec<E::Fr>,
-    params: &SharkMiMCParams<E>
+    params: &SharkMiMCParams<E>,
+    apply_sbox: &Fn(&E::Fr) -> E::Fr
 ) -> Vec<E::Fr>
 {
     assert_eq!(input.len(), params.num_branches);
-
-    fn apply_sbox<E: Engine>(
-        elem: &E::Fr
-    ) -> E::Fr
-    {
-        let mut res = E::Fr::one();
-        res.mul_assign(elem);
-        res.mul_assign(elem);
-        res.mul_assign(elem);
-        res
-    }
 
     let mut value_branch = input;
     let mut value_branch_temp = vec![E::Fr::zero(); params.num_branches];
@@ -106,7 +126,7 @@ fn SharkMiMC<E: Engine>(
         // Sbox layer
         for i in 0..params.num_branches {
             value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
-            value_branch[i] = apply_sbox::<E>(&value_branch[i]);
+            value_branch[i] = apply_sbox(&value_branch[i]);
             round_keys_offset += 1;
         }
 
@@ -134,7 +154,7 @@ fn SharkMiMC<E: Engine>(
         }
 
         // partial Sbox layer
-        value_branch[0] = apply_sbox::<E>(&value_branch[0]);
+        value_branch[0] = apply_sbox(&value_branch[0]);
 
         // linear layer
         for j in 0..params.num_branches {
@@ -157,7 +177,7 @@ fn SharkMiMC<E: Engine>(
         // Sbox layer
         for i in 0..params.num_branches {
             value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
-            value_branch[i] = apply_sbox::<E>(&value_branch[i]);
+            value_branch[i] = apply_sbox(&value_branch[i]);
             round_keys_offset += 1;
         }
 
@@ -179,7 +199,7 @@ fn SharkMiMC<E: Engine>(
 
     for i in 0..params.num_branches {
         value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
-        value_branch[i] = apply_sbox::<E>(&value_branch[i]);
+        value_branch[i] = apply_sbox(&value_branch[i]);
         round_keys_offset += 1;
 
         value_branch[i].add_assign(&params.round_keys[round_keys_offset]);
@@ -189,14 +209,16 @@ fn SharkMiMC<E: Engine>(
     value_branch
 }
 
-/*pub trait Sbox<E: Engine> {
-    fn apply(elem: &E::Fr) -> E::Fr;
-}*/
+enum SboxType {
+    Cube,
+    Inverse
+}
 
 // Circuit for proving knowledge of the preimage of a SharkMiMC hash.
 struct SharkMiMCCircuit<'a, E: Engine> {
     pub input: Vec<Option<E::Fr>>,
-    params: &'a SharkMiMCParams<E>
+    params: &'a SharkMiMCParams<E>,
+    sbox_type: SboxType
 }
 
 /*impl<'a, E: Engine> SharkMiMCCircuit<'a, E> {
@@ -225,6 +247,82 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
         let mut round_keys_offset = 0;
 
+        fn synthesize_sbox<E: Engine, CS: ConstraintSystem<E>>(
+            cs: &mut CS,
+            input_val: &Option<E::Fr>,
+            input_var: Variable,
+            round_key: E::Fr,
+            sbox_type: &SboxType
+        ) -> Result<Option<E::Fr>, SynthesisError> {
+            match sbox_type {
+                SboxType::Cube => synthesize_cube_sbox::<E, CS>(cs, input_val, input_var, round_key),
+                SboxType::Inverse => Err(SynthesisError::AssignmentMissing)
+            }
+        }
+
+        fn synthesize_cube_sbox<E: Engine, CS: ConstraintSystem<E>>(
+            cs: &mut CS,
+            input_val: &Option<E::Fr>,
+            input_var: Variable,
+            round_key: E::Fr
+        ) -> Result<Option<E::Fr>, SynthesisError> {
+            let mut tmp = input_val.clone();
+            tmp = tmp.map(| mut t | {
+                t.add_assign(&round_key);
+                t
+            });
+
+            let mut square_val = tmp.clone().map(|mut t| {
+                t.square();
+                t
+            });
+            let mut square = cs.alloc(|| "square", || {
+                square_val.ok_or(SynthesisError::AssignmentMissing)
+            })?;
+            cs.enforce(
+                || "square constraint",
+                |lc| lc + input_var + (round_key, CS::one()),
+                |lc| lc + input_var + (round_key, CS::one()),
+                |lc| lc + square
+            );
+
+            let mut cube_val = square_val.map(|mut t| {
+                t.mul_assign(&tmp.unwrap());
+                t
+            });
+            let mut cube = cs.alloc(|| "cube", || {
+                cube_val.ok_or(SynthesisError::AssignmentMissing)
+            })?;
+            cs.enforce(
+                || "cube constraint",
+                |lc| lc + square,
+                |lc| lc + input_var + (round_key, CS::one()),
+                |lc| lc + cube
+            );
+
+            Ok(cube_val)
+        }
+
+        fn apply_linear_layer<E: Engine>(
+            num_branches: usize,
+            sbox_out_vals: &Vec<Option<E::Fr>>,
+            next_input_vals: &mut Vec<Option<E::Fr>>,
+            matrix_2: &Vec<Vec<E::Fr>>,
+        ) {
+            for j in 0..num_branches {
+                for i in 0..num_branches {
+                    let tmp = sbox_out_vals[j].clone().map( | mut t | {
+                        t.mul_assign(&matrix_2[i][j]);
+                        t
+                    });
+                    next_input_vals[i] = next_input_vals[i].map( | mut t | {
+                        tmp.map(| t_ | t.add_assign(&t_));
+                        t
+                    });
+                }
+            }
+        }
+
         // ------------ First 3 rounds begin --------------------
 
         for k in 0..3 {
@@ -232,45 +330,12 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
             // Substitution (S-box) layer
             for i in 0..num_branches {
-                let cs = &mut cs.namespace(|| format!("sbox: round-branch: {}:{}", k, i));
+                let mut cs = &mut cs.namespace(|| format!("sbox: round-branch: {}:{}", k, i));
 
                 let round_key = self.params.round_keys[round_keys_offset];
 
-                let mut tmp = input_vals[i].clone();
-                tmp = tmp.map(| mut t | {
-                    t.add_assign(&round_key);
-                    t
-                });
-
-                let mut square_val = tmp.clone().map(|mut t| {
-                    t.square();
-                    t
-                });
-                let mut square = cs.alloc(|| "square", || {
-                    square_val.ok_or(SynthesisError::AssignmentMissing)
-                })?;
-                cs.enforce(
-                    || "square constraint",
-                    |lc| lc + input_vars[i] + (round_key, CS::one()),
-                    |lc| lc + input_vars[i] + (round_key, CS::one()),
-                    |lc| lc + square
-                );
-
-                let mut cube_val = square_val.map(|mut t| {
-                    t.mul_assign(&tmp.unwrap());
-                    t
-                });
-                let mut cube = cs.alloc(|| "cube", || {
-                    cube_val.ok_or(SynthesisError::AssignmentMissing)
-                })?;
-                cs.enforce(
-                    || "cube constraint",
-                    |lc| lc + square,
-                    |lc| lc + input_vars[i] + (round_key, CS::one()),
-                    |lc| lc + cube
-                );
-
-                sbox_out_vals[i] = cube_val;
+                sbox_out_vals[i] = synthesize_sbox(&mut cs, &input_vals[i].clone(),
+                                                   input_vars[i].clone(), round_key.clone(), &self.sbox_type)?;
 
                 round_keys_offset += 1;
             }
@@ -279,19 +344,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
             let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
 
-            for j in 0..num_branches {
-                for i in 0..num_branches {
-                    let tmp = sbox_out_vals[j].clone().map( | mut t | {
-                        t.mul_assign(&self.params.matrix_2[i][j]);
-                        t
-                    });
-                    next_input_vals[i] = next_input_vals[i].map( | mut t | {
-//                        t.add_assign(&tmp.unwrap());
-                        tmp.map(| t_ | t.add_assign(&t_));
-                        t
-                    });
-                }
-            }
+            apply_linear_layer::<E>(num_branches, &sbox_out_vals, &mut next_input_vals, &self.params.matrix_2);
 
             for i in 0..num_branches {
                 input_vals[i] = next_input_vals[i];
@@ -315,47 +368,19 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
             // Substitution (S-box) layer
             for i in 0..num_branches {
-                let cs = &mut cs.namespace(|| format!("sbox: round-branch: {}:{}", k, i));
+                let mut cs = &mut cs.namespace(|| format!("sbox: round-branch: {}:{}", k, i));
 
                 let round_key = self.params.round_keys[round_keys_offset];
 
-                let mut tmp = input_vals[i].clone();
-                tmp = tmp.map(|mut t| {
-                    t.add_assign(&round_key);
-                    t
-                });
-
                 if i == 0 {
-                    let mut square_val = tmp.clone().map(|mut t| {
-                        t.square();
-                        t
-                    });
-                    let mut square = cs.alloc(|| "square", || {
-                        square_val.ok_or(SynthesisError::AssignmentMissing)
-                    })?;
-                    cs.enforce(
-                        || "square constraint",
-                        |lc| lc + input_vars[i] + (round_key, CS::one()),
-                        |lc| lc + input_vars[i] + (round_key, CS::one()),
-                        |lc| lc + square
-                    );
-
-                    let mut cube_val = square_val.map(|mut t| {
-                        t.mul_assign(&tmp.unwrap());
-                        t
-                    });
-                    let mut cube = cs.alloc(|| "cube", || {
-                        cube_val.ok_or(SynthesisError::AssignmentMissing)
-                    })?;
-                    cs.enforce(
-                        || "cube constraint",
-                        |lc| lc + square,
-                        |lc| lc + input_vars[i] + (round_key, CS::one()),
-                        |lc| lc + cube
-                    );
-
-                    sbox_out_vals[i] = cube_val;
+                    sbox_out_vals[i] = synthesize_sbox(&mut cs, &input_vals[i].clone(),
+                                                       input_vars[i].clone(), round_key.clone(), &self.sbox_type)?;
                 } else {
+                    let mut tmp = input_vals[i].clone();
+                    tmp = tmp.map(|mut t| {
+                        t.add_assign(&round_key);
+                        t
+                    });
                     sbox_out_vals[i] = tmp;
                 }
 
@@ -366,19 +391,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
             let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
 
-            for j in 0..num_branches {
-                for i in 0..num_branches {
-                    let tmp = sbox_out_vals[j].clone().map( | mut t | {
-                        t.mul_assign(&self.params.matrix_2[i][j]);
-                        t
-                    });
-                    next_input_vals[i] = next_input_vals[i].map( | mut t | {
-//                        t.add_assign(&tmp.unwrap());
-                        tmp.map(| t_ | t.add_assign(&t_));
-                        t
-                    });
-                }
-            }
+            apply_linear_layer::<E>(num_branches, &sbox_out_vals, &mut next_input_vals, &self.params.matrix_2);
 
             for i in 0..num_branches {
                 input_vals[i] = next_input_vals[i];
@@ -404,45 +417,12 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
             // Substitution (S-box) layer
             for i in 0..num_branches {
-                let cs = &mut cs.namespace(|| format!("sbox: round-branch: {}:{}", k, i));
+                let mut cs = &mut cs.namespace(|| format!("sbox: round-branch: {}:{}", k, i));
 
                 let round_key = self.params.round_keys[round_keys_offset];
 
-                let mut tmp = input_vals[i].clone();
-                tmp = tmp.map(| mut t | {
-                    t.add_assign(&round_key);
-                    t
-                });
-
-                let mut square_val = tmp.clone().map(|mut t| {
-                    t.square();
-                    t
-                });
-                let mut square = cs.alloc(|| "square", || {
-                    square_val.ok_or(SynthesisError::AssignmentMissing)
-                })?;
-                cs.enforce(
-                    || "square constraint",
-                    |lc| lc + input_vars[i] + (round_key, CS::one()),
-                    |lc| lc + input_vars[i] + (round_key, CS::one()),
-                    |lc| lc + square
-                );
-
-                let mut cube_val = square_val.map(|mut t| {
-                    t.mul_assign(&tmp.unwrap());
-                    t
-                });
-                let mut cube = cs.alloc(|| "cube", || {
-                    cube_val.ok_or(SynthesisError::AssignmentMissing)
-                })?;
-                cs.enforce(
-                    || "cube constraint",
-                    |lc| lc + square,
-                    |lc| lc + input_vars[i] + (round_key, CS::one()),
-                    |lc| lc + cube
-                );
-
-                sbox_out_vals[i] = cube_val;
+                sbox_out_vals[i] = synthesize_sbox(&mut cs, &input_vals[i].clone(),
+                                                   input_vars[i].clone(), round_key.clone(), &self.sbox_type)?;
 
                 round_keys_offset += 1;
             }
@@ -451,19 +431,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
             let mut next_input_vals: Vec<Option<E::Fr>> = vec![Some(E::Fr::zero()); num_branches];
 
-            for j in 0..num_branches {
-                for i in 0..num_branches {
-                    let tmp = sbox_out_vals[j].clone().map( | mut t | {
-                        t.mul_assign(&self.params.matrix_2[i][j]);
-                        t
-                    });
-                    next_input_vals[i] = next_input_vals[i].map( | mut t | {
-//                        t.add_assign(&tmp.unwrap());
-                        tmp.map(| t_ | t.add_assign(&t_));
-                        t
-                    });
-                }
-            }
+            apply_linear_layer::<E>(num_branches, &sbox_out_vals, &mut next_input_vals, &self.params.matrix_2);
 
             for i in 0..num_branches {
                 let cs = &mut cs.namespace(|| format!("linear: round-branch: {}:{}", k, i));
@@ -480,43 +448,12 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
         // Substitution (S-box) layer
         for i in 0..num_branches {
-            let cs = &mut cs.namespace(|| format!("sbox: round-branch: {}:{}", self.params.total_rounds-1, i));
+            let mut cs = &mut cs.namespace(|| format!("sbox: round-branch: {}:{}", self.params.total_rounds-1, i));
 
             let round_key = self.params.round_keys[round_keys_offset];
 
-            let mut tmp = input_vals[i].clone();
-            tmp = tmp.map(|mut t| {
-                t.add_assign(&round_key);
-                t
-            });
-
-            let mut square_val = tmp.clone().map(|mut t| {
-                t.square();
-                t
-            });
-            let mut square = cs.alloc(|| "square", || {
-                square_val.ok_or(SynthesisError::AssignmentMissing)
-            })?;
-            cs.enforce(
-                || "square constraint",
-                |lc| lc + input_vars[i] + (round_key, CS::one()),
-                |lc| lc + input_vars[i] + (round_key, CS::one()),
-                |lc| lc + square
-            );
-
-            let mut cube_val = square_val.map(|mut t| {
-                t.mul_assign(&tmp.unwrap());
-                t
-            });
-            let mut cube = cs.alloc(|| "cube", || {
-                cube_val.ok_or(SynthesisError::AssignmentMissing)
-            })?;
-            cs.enforce(
-                || "cube constraint",
-                |lc| lc + square,
-                |lc| lc + input_vars[i] + (round_key, CS::one()),
-                |lc| lc + cube
-            );
+            let cube_val = synthesize_sbox(&mut cs, &input_vals[i].clone(),
+                                               input_vars[i].clone(), round_key.clone(), &self.sbox_type)?;
 
             round_keys_offset += 1;
 
@@ -565,7 +502,7 @@ fn SharkMiMC_with_TestConstraintSystem() {
     for i in 0..num_branches {
         input1[i] = input[i].clone().unwrap();
     }
-    let image_from_func = SharkMiMC::<Bls12>(input1, &s_params);
+    let image_from_func = SharkMiMC::<Bls12>(input1, &s_params, &apply_cube_sbox::<Bls12>);
     println!("Output (from function) >>>>>>>>>");
     for i in 0..num_branches {
         println!("{}", image_from_func[i]);
@@ -573,7 +510,8 @@ fn SharkMiMC_with_TestConstraintSystem() {
 
     let c = SharkMiMCCircuit::<Bls12> {
         input,
-        params: &s_params
+        params: &s_params,
+        sbox_type: SboxType::Cube
     };
 
     let total_rounds = c.params.total_rounds;
@@ -596,7 +534,7 @@ fn SharkMiMC_with_TestConstraintSystem() {
 }
 
 #[test]
-fn test_SharkMiMC() {
+fn SharkMiMC_with_cube_Sbox() {
     use pairing::bls12_381::{Bls12, Fr};
     use pairing::PrimeField;
 
@@ -609,7 +547,8 @@ fn test_SharkMiMC() {
     let params = {
         let c = SharkMiMCCircuit::<Bls12> {
             input: vec![None; num_branches],
-            params: &s_params
+            params: &s_params,
+            sbox_type: SboxType::Cube
         };
 
         let x = generate_random_parameters(c, rng);
@@ -623,7 +562,8 @@ fn test_SharkMiMC() {
     let circuit = SharkMiMCCircuit::<Bls12> {
         input: vec![Fr::from_str("1"), Fr::from_str("2"),
                     Fr::from_str("3"), Fr::from_str("4")],
-        params: &s_params
+        params: &s_params,
+        sbox_type: SboxType::Cube
     };
 
     let proof = create_random_proof(circuit, &params, rng).unwrap();
