@@ -108,6 +108,7 @@ pub trait HasInverseSbox<E: Engine>: HasSbox<E> {
     }
 }*/
 
+// Sbox is parametrized using function `apply_sbox`
 fn SharkMiMC<E: Engine>(
     input: Vec<E::Fr>,
     params: &SharkMiMCParams<E>,
@@ -247,6 +248,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
         let mut round_keys_offset = 0;
 
+        // Allocate variables in circuit and enforce constraints for Sbox layer
         fn synthesize_sbox<E: Engine, CS: ConstraintSystem<E>>(
             cs: &mut CS,
             input_val: &Option<E::Fr>,
@@ -260,6 +262,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
             }
         }
 
+        // Allocate variables in circuit and enforce constraints when Sbox as cube
         fn synthesize_cube_sbox<E: Engine, CS: ConstraintSystem<E>>(
             cs: &mut CS,
             input_val: &Option<E::Fr>,
@@ -280,7 +283,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
                 square_val.ok_or(SynthesisError::AssignmentMissing)
             })?;
             cs.enforce(
-                || "square constraint",
+                || "square constraint (x * x = x^2)",
                 |lc| lc + input_var + (round_key, CS::one()),
                 |lc| lc + input_var + (round_key, CS::one()),
                 |lc| lc + square
@@ -294,7 +297,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
                 cube_val.ok_or(SynthesisError::AssignmentMissing)
             })?;
             cs.enforce(
-                || "cube constraint",
+                || "cube constraint (x^2 * x = x^3)",
                 |lc| lc + square,
                 |lc| lc + input_var + (round_key, CS::one()),
                 |lc| lc + cube
@@ -303,6 +306,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
             Ok(cube_val)
         }
 
+        // Allocate variables in circuit and enforce constraints when Sbox as inverse
         fn synthesize_inverse_sbox<E: Engine, CS: ConstraintSystem<E>>(
             cs: &mut CS,
             input_val: &Option<E::Fr>,
@@ -321,7 +325,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
                 inverse_val.ok_or(SynthesisError::AssignmentMissing)
             })?;
             cs.enforce(
-                || "inverse constraint",
+                || "inverse constraint (x * x^-1 = 1)",
                 |lc| lc + input_var + (round_key, CS::one()),
                 |lc| lc + inverse,
                 |lc| lc + CS::one()
