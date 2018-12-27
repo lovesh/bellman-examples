@@ -294,11 +294,13 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
             }
 
             for i in 0..num_branches {
-                let cs = &mut cs.namespace(|| format!("linear: round-branch: {}:{}", k, i));
                 input_vals[i] = next_input_vals[i];
-                input_vars[i] = cs.alloc(|| "linear", || {
-                    next_input_vals[i].ok_or(SynthesisError::AssignmentMissing)
-                })?;
+                if k < 2 || i == 0 {
+                    let cs = &mut cs.namespace(|| format!("linear: round-branch: {}:{}", k, i));
+                    input_vars[i] = cs.alloc(|| "linear", || {
+                        next_input_vals[i].ok_or(SynthesisError::AssignmentMissing)
+                    })?;
+                }
             }
         }
 
@@ -377,11 +379,13 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
             }
 
             for i in 0..num_branches {
-                let cs = &mut cs.namespace(|| format!("linear: round-branch: {}:{}", k, i));
                 input_vals[i] = next_input_vals[i];
-                input_vars[i] = cs.alloc(|| "linear", || {
-                    next_input_vals[i].ok_or(SynthesisError::AssignmentMissing)
-                })?;
+                if i == 0 || k == 3+self.params.middle_rounds-1 {
+                    let cs = &mut cs.namespace(|| format!("linear: round-branch: {}:{}", k, i));
+                    input_vars[i] = cs.alloc(|| "linear", || {
+                        next_input_vals[i].ok_or(SynthesisError::AssignmentMissing)
+                    })?;
+                }
             }
         }
 
@@ -532,7 +536,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
 
 
 #[test]
-fn test_SharkMiMC1() {
+fn SharkMiMC_with_TestConstraintSystem() {
     use pairing::bls12_381::{Bls12, Fr, FrRepr};
     use pairing::{PrimeField, PrimeFieldRepr};
     use testing_cs::TestConstraintSystem;
@@ -583,7 +587,7 @@ fn test_SharkMiMC1() {
     }
 
     assert_eq!(image_from_func, image_from_circuit);
-    println!("{}", cs.find_unconstrained());
+//    println!("{}", cs.find_unconstrained());
 }
 
 #[test]
