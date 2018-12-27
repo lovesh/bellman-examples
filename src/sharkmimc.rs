@@ -92,7 +92,7 @@ fn apply_inverse_sbox<E: Engine>(elem: &E::Fr) -> E::Fr
     elem.inverse().map_or(E::Fr::zero(), | t | t)
 }
 
-pub trait HasSbox<E: Engine> {
+/*pub trait HasSbox<E: Engine> {
     fn apply_sbox(elem: &E::Fr) -> E::Fr;
 }
 
@@ -106,7 +106,7 @@ pub trait HasInverseSbox<E: Engine>: HasSbox<E> {
     fn apply_sbox(elem: &E::Fr) -> E::Fr {
         apply_inverse_sbox::<E>(elem)
     }
-}
+}*/
 
 fn SharkMiMC<E: Engine>(
     input: Vec<E::Fr>,
@@ -256,7 +256,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
         ) -> Result<Option<E::Fr>, SynthesisError> {
             match sbox_type {
                 SboxType::Cube => synthesize_cube_sbox::<E, CS>(cs, input_val, input_var, round_key),
-                SboxType::Inverse => Err(SynthesisError::AssignmentMissing)
+                SboxType::Inverse => synthesize_inverse_sbox::<E, CS>(cs, input_val, input_var, round_key)
             }
         }
 
@@ -272,7 +272,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
                 t
             });
 
-            let mut square_val = tmp.clone().map(|mut t| {
+            let mut square_val = tmp.map(|mut t| {
                 t.square();
                 t
             });
@@ -301,6 +301,33 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
             );
 
             Ok(cube_val)
+        }
+
+        fn synthesize_inverse_sbox<E: Engine, CS: ConstraintSystem<E>>(
+            cs: &mut CS,
+            input_val: &Option<E::Fr>,
+            input_var: Variable,
+            round_key: E::Fr
+        ) -> Result<Option<E::Fr>, SynthesisError> {
+            let mut tmp = input_val.map(|mut t| {
+                t.add_assign(&round_key);
+                t
+            });;
+
+            let mut inverse_val = tmp.map(| t| {
+                apply_inverse_sbox::<E>(&t)
+            });
+            let mut inverse = cs.alloc(|| "inverse", || {
+                inverse_val.ok_or(SynthesisError::AssignmentMissing)
+            })?;
+            cs.enforce(
+                || "inverse constraint",
+                |lc| lc + input_var + (round_key, CS::one()),
+                |lc| lc + inverse,
+                |lc| lc + CS::one()
+            );
+
+            Ok(inverse_val)
         }
 
         fn apply_linear_layer<E: Engine>(
@@ -483,13 +510,11 @@ fn SharkMiMC_with_TestConstraintSystem() {
     use pairing::{PrimeField, PrimeFieldRepr};
     use testing_cs::TestConstraintSystem;
 
-    let mut cs = TestConstraintSystem::<Bls12>::new();
-
     let num_branches = 4;
     let middle_rounds = 38;
     let s_params = SharkMiMCParams::<Bls12>::new(num_branches, middle_rounds);
-    let k = u64::from(1 as u32);
-//    let j = Fr::Repr::from(k);
+    let total_rounds = s_params.total_rounds;
+
     let input = vec![Fr::from_str("1"), Fr::from_str("2"),
                      Fr::from_str("3"), Fr::from_str("4")];
     println!("Input >>>>>>>>>");
@@ -502,39 +527,79 @@ fn SharkMiMC_with_TestConstraintSystem() {
     for i in 0..num_branches {
         input1[i] = input[i].clone().unwrap();
     }
-    let image_from_func = SharkMiMC::<Bls12>(input1, &s_params, &apply_cube_sbox::<Bls12>);
-    println!("Output (from function) >>>>>>>>>");
+    let input2 = input1.clone();
+    let image_from_func_cube = SharkMiMC::<Bls12>(input1, &s_params, &apply_cube_sbox::<Bls12>);
+    let image_from_func_inverse = SharkMiMC::<Bls12>(input2, &s_params, &apply_inverse_sbox::<Bls12>);
+
+    println!("Output with Sbox as cube (from function) >>>>>>>>>");
     for i in 0..num_branches {
-        println!("{}", image_from_func[i]);
+        println!("{}", image_from_func_cube[i]);
     }
 
-    let c = SharkMiMCCircuit::<Bls12> {
-        input,
-        params: &s_params,
-        sbox_type: SboxType::Cube
-    };
+    println!("Output with Sbox as inverse (from function) >>>>>>>>>");
+    for i in 0..num_branches {
+        println!("{}", image_from_func_inverse[i]);
+    }
 
-    let total_rounds = c.params.total_rounds;
+    {
+        println!("Checking with Sbox as cube");
+        let mut cs = TestConstraintSystem::<Bls12>::new();
 
-    c.synthesize(&mut cs).unwrap();
-    let satisfied = cs.is_satisfied();
-    assert!(satisfied);
-    println!("Is satisfied {}", satisfied);
-    println!("Num constraints {}", &cs.num_constraints());
+        let c = SharkMiMCCircuit::<Bls12> {
+            input: input.clone(),
+            params: &s_params,
+            sbox_type: SboxType::Cube
+        };
+
+        c.synthesize(&mut cs).unwrap();
+        let satisfied = cs.is_satisfied();
+        assert!(satisfied);
+        println!("Is satisfied {}", satisfied);
+        println!("Num constraints {}", &cs.num_constraints());
 //    println!("{}", &cs.pretty_print());
-    let mut image_from_circuit = vec![Fr::zero(); num_branches];
+        let mut image_from_circuit = vec![Fr::zero(); num_branches];
 
-    for i in 0..num_branches {
-        image_from_circuit[i] = cs.get(&format!("sbox: round-branch: {}:{}/image", total_rounds-1, i));
-        println!("Output {}:{}", i, &image_from_circuit[i]);
+        for i in 0..num_branches {
+            image_from_circuit[i] = cs.get(&format!("sbox: round-branch: {}:{}/image", total_rounds-1, i));
+            println!("Output {}:{}", i, &image_from_circuit[i]);
+        }
+
+        assert_eq!(image_from_func_cube, image_from_circuit);
+//    println!("{}", cs.find_unconstrained());
+        println!("Successful with Sbox as cube");
     }
 
-    assert_eq!(image_from_func, image_from_circuit);
-//    println!("{}", cs.find_unconstrained());
+    {
+        println!("Checking with Sbox as inverse");
+        let mut cs = TestConstraintSystem::<Bls12>::new();
+
+        let c = SharkMiMCCircuit::<Bls12> {
+            input,
+            params: &s_params,
+            sbox_type: SboxType::Inverse
+        };
+
+        c.synthesize(&mut cs).unwrap();
+        let satisfied = cs.is_satisfied();
+        assert!(satisfied);
+        println!("Is satisfied {}", satisfied);
+        println!("Num constraints {}", &cs.num_constraints());
+
+        let mut image_from_circuit = vec![Fr::zero(); num_branches];
+
+        for i in 0..num_branches {
+            image_from_circuit[i] = cs.get(&format!("sbox: round-branch: {}:{}/image", total_rounds-1, i));
+            println!("Output {}:{}", i, &image_from_circuit[i]);
+        }
+
+        assert_eq!(image_from_func_inverse, image_from_circuit);
+
+        println!("Successful with Sbox as inverse");
+    }
 }
 
 #[test]
-fn SharkMiMC_with_cube_Sbox() {
+fn SharkMiMC_basic() {
     use pairing::bls12_381::{Bls12, Fr};
     use pairing::PrimeField;
 
@@ -544,35 +609,71 @@ fn SharkMiMC_with_cube_Sbox() {
     let middle_rounds = 38;
     let s_params = SharkMiMCParams::<Bls12>::new(num_branches, middle_rounds);
 
-    let params = {
-        let c = SharkMiMCCircuit::<Bls12> {
-            input: vec![None; num_branches],
+    {
+        let params = {
+            let c = SharkMiMCCircuit::<Bls12> {
+                input: vec![None; num_branches],
+                params: &s_params,
+                sbox_type: SboxType::Cube
+            };
+
+            let x = generate_random_parameters(c, rng);
+//        assert!(x.is_ok());
+            x.unwrap()
+        };
+
+        let pvk = prepare_verifying_key(&params.vk);
+
+        // Input and output generated from python implementation (sharkmimc.py)
+        let circuit = SharkMiMCCircuit::<Bls12> {
+            input: vec![Fr::from_str("1"), Fr::from_str("2"),
+                        Fr::from_str("3"), Fr::from_str("4")],
             params: &s_params,
             sbox_type: SboxType::Cube
         };
 
-        let x = generate_random_parameters(c, rng);
+        let proof = create_random_proof(circuit, &params, rng).unwrap();
+
+        let image: Vec<Fr> = vec![
+            Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
+            Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
+            Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
+            Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap()
+        ];
+        assert!(verify_proof(&pvk, &proof, &image).unwrap());
+    }
+
+    {
+        let params = {
+            let c = SharkMiMCCircuit::<Bls12> {
+                input: vec![None; num_branches],
+                params: &s_params,
+                sbox_type: SboxType::Inverse
+            };
+
+            let x = generate_random_parameters(c, rng);
 //        assert!(x.is_ok());
-        x.unwrap()
-    };
+            x.unwrap()
+        };
 
-    let pvk = prepare_verifying_key(&params.vk);
+        let pvk = prepare_verifying_key(&params.vk);
 
-    // Input and output generated from python implementation (sharkmimc.py)
-    let circuit = SharkMiMCCircuit::<Bls12> {
-        input: vec![Fr::from_str("1"), Fr::from_str("2"),
-                    Fr::from_str("3"), Fr::from_str("4")],
-        params: &s_params,
-        sbox_type: SboxType::Cube
-    };
+        // Input and output generated from python implementation (sharkmimc.py)
+        let circuit = SharkMiMCCircuit::<Bls12> {
+            input: vec![Fr::from_str("1"), Fr::from_str("2"),
+                        Fr::from_str("3"), Fr::from_str("4")],
+            params: &s_params,
+            sbox_type: SboxType::Inverse
+        };
 
-    let proof = create_random_proof(circuit, &params, rng).unwrap();
+        let proof = create_random_proof(circuit, &params, rng).unwrap();
 
-    let image: Vec<Fr> = vec![
-        Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
-        Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
-        Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap(),
-        Fr::from_str("7662334185782834131368228856096374400481443875468189238128380422619483242028").unwrap()
-    ];
-    assert!(verify_proof(&pvk, &proof, &image).unwrap());
+        let image: Vec<Fr> = vec![
+            Fr::from_str("10276024393822213844666845682424323944661768026855316848735489998167350300948").unwrap(),
+            Fr::from_str("10276024393822213844666845682424323944661768026855316848735489998167350300948").unwrap(),
+            Fr::from_str("10276024393822213844666845682424323944661768026855316848735489998167350300948").unwrap(),
+            Fr::from_str("10276024393822213844666845682424323944661768026855316848735489998167350300948").unwrap()
+        ];
+        assert!(verify_proof(&pvk, &proof, &image).unwrap());
+    }
 }
