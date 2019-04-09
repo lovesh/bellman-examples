@@ -3,6 +3,8 @@
 extern crate bellman;
 extern crate pairing;
 extern crate rand;
+extern crate core;
+
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 use pairing::{Engine, Field, PrimeField};
 
@@ -10,6 +12,9 @@ mod cube;
 mod multiply;
 mod testing_cs;
 mod sharkmimc;
+mod mimc;
+mod merkle_tree;
+use merkle_tree::vanilla_sparse_merkle_tree;
 
 fn main(){
     use pairing::bls12_381::{Bls12, Fr};
