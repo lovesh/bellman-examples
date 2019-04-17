@@ -110,6 +110,7 @@ impl<'a, E: Engine> OptmzSparseMerkleTree<'a, E> {
             }
             //cur_idx.shl(1);
             cur_idx.mul2();
+            //cur_idx = reduce_field_repr::<E>(cur_idx);
         }
 
         match proof {
@@ -165,15 +166,17 @@ impl<'a, E: Engine> OptmzSparseMerkleTree<'a, E> {
     }
 
     fn _update(&mut self, path: <E::Fr as PrimeField>::Repr, val: E::Fr, root: &E::Fr, depth: usize) -> E::Fr {
+        println!("Called _update with key-val {:?}={:?}", &path, &val);
         if depth == self.depth {
             return val
         }
 
         if are_equal::<E>(root, &self.empty_tree_hashes[depth]) {
+            println!("Calling get_subtree_with_one_val with depth {} key-val {:?}={:?}", depth, &path, &val);
             let new_root = self.get_subtree_with_one_val(path, &val, depth);
-            self.update_db_with_key_value(&new_root,
-                                          //(Some(true), E::Fr::from_repr(path).unwrap(), val));
-                                          (Some(true), reduce_field_repr_to_elem::<E>(path), val));
+            self.update_db(&new_root,
+                           //(Some(true), E::Fr::from_repr(path).unwrap(), val));
+                                          (Some(true), reduce_field_repr_to_elem::<E>(path.clone()), val));
             return new_root
         }
 
@@ -185,15 +188,16 @@ impl<'a, E: Engine> OptmzSparseMerkleTree<'a, E> {
         } else {
             let mut new_path = path.clone();
             new_path.mul2();
+            //new_path = reduce_field_repr::<E>(new_path);
             if is_msb_zero!(path, self.depth as u32) {
                 let new_left = self._update(new_path, val, &child.1, depth+1);
                 let root = mimc::<E>(new_left.clone(), child.2.clone(), self.hash_constants);
-                self.update_db_with_key_value(&root, (None, new_left, child.2.clone()));
+                self.update_db(&root, (None, new_left, child.2.clone()));
                 return root
             } else {
                 let new_right = self._update(new_path, val, &child.2, depth+1);
                 let root = mimc::<E>(child.1.clone(), new_right.clone(), self.hash_constants);
-                self.update_db_with_key_value(&root, (None, child.1.clone(), new_right));
+                self.update_db(&root, (None, child.1.clone(), new_right));
                 return root
             }
         }
@@ -202,6 +206,8 @@ impl<'a, E: Engine> OptmzSparseMerkleTree<'a, E> {
     fn update_one_val_subtree(&mut self, path_for_new_key: <E::Fr as PrimeField>::Repr,
                               val_for_new_key: E::Fr, path_for_old_key: <E::Fr as PrimeField>::Repr,
                               val_for_old_key: E::Fr, depth: usize) -> E::Fr {
+        println!("Called update_one_val_subtree with new key-val {:?}={:?}", &path_for_new_key, &val_for_new_key);
+        println!("Called update_one_val_subtree with old key-val {:?}={:?}", &path_for_old_key, &val_for_old_key);
         if depth == self.depth {
             panic!("Error in update_one_val_subtree")
         }
@@ -219,18 +225,22 @@ impl<'a, E: Engine> OptmzSparseMerkleTree<'a, E> {
                                                  next_old_path, val_for_old_key, depth+1),
                      self.empty_tree_hashes[depth+1].clone())
                 } else {
+                    println!("Calling get_subtree_with_one_val with depth {} key-val {:?}={:?}", depth+1, &next_new_path, &val_for_new_key);
                     let left_subtree_hash = self.get_subtree_with_one_val(next_new_path, &val_for_new_key, depth+1);
+                    println!("Calling get_subtree_with_one_val with depth {} key-val {:?}={:?}", depth+1, &next_old_path, &val_for_old_key);
                     let right_subtree_hash = self.get_subtree_with_one_val(next_old_path, &val_for_old_key, depth+1);
-                    self.update_db_with_key_value(&left_subtree_hash, (Some(true), reduce_field_repr_to_elem::<E>(next_new_path), val_for_new_key));
-                    self.update_db_with_key_value(&right_subtree_hash, (Some(true), reduce_field_repr_to_elem::<E>(next_old_path), val_for_old_key));
+                    self.update_db(&left_subtree_hash, (Some(true), reduce_field_repr_to_elem::<E>(next_new_path), val_for_new_key));
+                    self.update_db(&right_subtree_hash, (Some(true), reduce_field_repr_to_elem::<E>(next_old_path), val_for_old_key));
                     (left_subtree_hash, right_subtree_hash)
                 }
             } else {
                 if is_msb_zero!(path_for_old_key, self.depth as u32) {
+                    println!("Calling get_subtree_with_one_val with depth {} key-val {:?}={:?}", depth+1, &next_old_path, &val_for_old_key);
                     let left_subtree_hash = self.get_subtree_with_one_val(next_old_path, &val_for_old_key, depth+1);
+                    println!("Calling get_subtree_with_one_val with depth {} key-val {:?}={:?}", depth+1, &next_new_path, &val_for_new_key);
                     let right_subtree_hash = self.get_subtree_with_one_val(next_new_path, &val_for_new_key, depth+1);
-                    self.update_db_with_key_value(&left_subtree_hash, (Some(true), reduce_field_repr_to_elem::<E>(next_old_path), val_for_old_key));
-                    self.update_db_with_key_value(&right_subtree_hash, (Some(true), reduce_field_repr_to_elem::<E>(next_new_path), val_for_new_key));
+                    self.update_db(&left_subtree_hash, (Some(true), reduce_field_repr_to_elem::<E>(next_old_path), val_for_old_key));
+                    self.update_db(&right_subtree_hash, (Some(true), reduce_field_repr_to_elem::<E>(next_new_path), val_for_new_key));
                     (left_subtree_hash, right_subtree_hash)
                 } else {
                     (self.empty_tree_hashes[depth+1].clone(),
@@ -241,7 +251,7 @@ impl<'a, E: Engine> OptmzSparseMerkleTree<'a, E> {
         };
 
         let root = mimc::<E>(left.clone(), right.clone(), self.hash_constants);
-        self.update_db_with_key_value(&root, (None, left, right));
+        self.update_db(&root, (None, left, right));
         root
     }
 
@@ -265,7 +275,7 @@ impl<'a, E: Engine> OptmzSparseMerkleTree<'a, E> {
         mimc::<E>(l, r, self.hash_constants)
     }
 
-    fn update_db_with_key_value(&mut self, key: &E::Fr, val: DBVal<E>) {
+    fn update_db(&mut self, key: &E::Fr, val: DBVal<E>) {
         let k = field_elem_to_bytes::<E>(key);
         //println!("Adding to db={:?}", key);
         //println!("Adding to db val={:?}", &val);
@@ -345,7 +355,9 @@ mod tests {
         let rng = &mut thread_rng();
 
         // Generate the MiMC round constants
-        let constants = (0..MIMC_ROUNDS).map(|_| rng.gen()).collect::<Vec<_>>();
+        //let constants = (0..MIMC_ROUNDS).map(|_| rng.gen()).collect::<Vec<_>>();
+        //let constants = (0..MIMC_ROUNDS).map(|i| Fr::from_str(&i.to_string()).unwrap()).collect::<Vec<_>>();
+        let constants = (0..MIMC_ROUNDS).map(|i| Fr::one()).collect::<Vec<_>>();
 
         let mut tree = OptmzSparseMerkleTree::<Bls12>::new(&constants);
         let (k0, v0) = (Fr::from_str("0").unwrap(), Fr::from_str("0").unwrap());
@@ -355,22 +367,24 @@ mod tests {
 
         tree.update(k0, v0);
         println!("DB size = {:?}", &tree.db.len());
-        tree.update(k1, v1);
+        //tree.update(k1, v1);
         println!("DB size = {:?}", &tree.db.len());
         tree.update(k2, v2);
         println!("DB size = {:?}", &tree.db.len());
-        tree.update(Fr::from_str("3").unwrap(), Fr::from_str("3").unwrap());
+        /*tree.update(Fr::from_str("3").unwrap(), Fr::from_str("3").unwrap());
         tree.update(Fr::from_str("6").unwrap(), Fr::from_str("6").unwrap());
-        tree.update(Fr::from_str("129").unwrap(), Fr::from_str("129").unwrap());
+        tree.update(Fr::from_str("129").unwrap(), Fr::from_str("129").unwrap());*/
+//        tree.update(Fr::from_str("192").unwrap(), Fr::from_str("192").unwrap());
         tree.update(k8, v8);
         println!("DB size = {:?}", &tree.db.len());
 
         assert_eq!(v0, tree.get(k0, &mut None));
-        assert_eq!(v1, tree.get(k1, &mut None));
+        //assert_eq!(v1, tree.get(k1, &mut None));
         assert_eq!(v2, tree.get(k2, &mut None));
-        assert_eq!(Fr::from_str("3").unwrap(), tree.get(Fr::from_str("3").unwrap(), &mut None));
+        /*assert_eq!(Fr::from_str("3").unwrap(), tree.get(Fr::from_str("3").unwrap(), &mut None));
         assert_eq!(Fr::from_str("6").unwrap(), tree.get(Fr::from_str("6").unwrap(), &mut None));
-        assert_eq!(Fr::from_str("129").unwrap(), tree.get(Fr::from_str("129").unwrap(), &mut None));
+        assert_eq!(Fr::from_str("129").unwrap(), tree.get(Fr::from_str("129").unwrap(), &mut None));*/
+//        assert_eq!(Fr::from_str("192").unwrap(), tree.get(Fr::from_str("192").unwrap(), &mut None));
         assert_eq!(v8, tree.get(k8, &mut None));
 
         /*for (k, v) in vec![(k0, v0), (k1, v1), (k2, v2), (k8, v8)] {
@@ -383,9 +397,31 @@ mod tests {
             assert!(tree.verify_proof(k, v, &proof_vec, &tree.root));
         }*/
 
+//        let n: Vec<u32> = (0..10).map(|_| rng.gen_range(200, 10100)).collect();
+        //let n: Vec<u32> = vec![7227, 4562, 1085, 1459, 4798, 3645, 1214, 4699, 7700, 3288];
+        let n: Vec<u32> = vec![7227, 7700];
+        let m: Vec<u32> = (1..=n.len()).map(|i| i as u32).collect();
+        //let s1: Vec<String> = (10000..10100).map(|i| i.to_string()).collect();
+        let s1: Vec<String> = n.iter().map(|i| i.to_string()).collect();
+        let s2: Vec<String> = m.iter().map(|i| i.to_string()).collect();
+        println!("n={:?}", &n);
+        println!("s1={:?}", &s1);
+        println!("m={:?}", &m);
+        println!("s2={:?}", &s2);
+        let kvs_1: Vec<(Fr, Fr)> = s1.iter().zip(s2).map(|(i, j)| (Fr::from_str(&i).unwrap(), Fr::from_str(&j).unwrap())).collect();
+        for i in 0..kvs_1.len() {
+            println!("Setting {:?}={:?}", &kvs_1[i].0, &kvs_1[i].1);
+            //tree.update(kvs_1[i].0, kvs_1[i].1);
+            tree.update(kvs_1[i].0, kvs_1[i].1);
+        }
+        for i in 0..kvs_1.len() {
+            println!("Getting {:?}", &kvs_1[i].0);
+            //assert_eq!(kvs_1[i].1, tree.get(kvs_1[i].0, &mut None));
+            assert_eq!(tree.get(kvs_1[i].0, &mut None), kvs_1[i].1);
+        }
 
         // Some random key values
-        let kvs: Vec<(Fr, Fr)> = (0..10).map(|_| (rng.gen(), rng.gen())).collect();
+        /*let kvs: Vec<(Fr, Fr)> = (0..10).map(|_| (rng.gen(), rng.gen())).collect();
         for i in 0..kvs.len() {
             println!("Setting {:?}={:?}", &kvs[i].0, &kvs[i].1);
             tree.update(kvs[i].0, kvs[i].1);
@@ -395,6 +431,6 @@ mod tests {
         for i in 0..kvs.len() {
             println!("Getting {:?}", &kvs[i].0);
             assert_eq!(kvs[i].1, tree.get(kvs[i].0, &mut None));
-        }
+        }*/
     }
 }

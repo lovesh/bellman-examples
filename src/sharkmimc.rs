@@ -428,7 +428,7 @@ impl<'a, E: Engine> Circuit<E> for SharkMiMCCircuit<'a, E> {
                 input_vals[i] = next_input_vals[i];
 
                 // For middle rounds, only first branch is involved in constraints. Allocate variables for
-                // all branches only for last middle round such that it can be used for input for next round.
+                // all branches only for the last middle round such that it can be used for input for next round.
                 if i == 0 || k == 3+self.params.middle_rounds-1 {
                     let cs = &mut cs.namespace(|| format!("linear: round-branch: {}:{}", k, i));
                     input_vars[i] = cs.alloc(|| "linear", || {

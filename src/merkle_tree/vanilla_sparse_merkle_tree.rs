@@ -61,7 +61,6 @@ impl<'a, E: Engine> VanillaSparseMerkleTree<'a, E> {
 
     pub fn update(&mut self, idx: E::Fr, val: E::Fr) -> E::Fr {
         let mut sidenodes: Vec<E::Fr> = vec![];
-        let depth_minus_1 = (self.depth - 1) as u32;
         let mut cur_node = self.root.clone();
         let mut cur_idx = idx.into_repr();
 
@@ -109,7 +108,6 @@ impl<'a, E: Engine> VanillaSparseMerkleTree<'a, E> {
     }
 
     pub fn get(&self, idx: E::Fr, proof: &mut Option<Vec<E::Fr>>) -> E::Fr {
-        let depth_minus_1 = (self.depth - 1) as u32;
         let mut cur_idx = idx.into_repr();
         let mut cur_node = self.root.clone();
 
@@ -375,6 +373,13 @@ impl<'a, E: Engine> Circuit<E> for VSMTVerif<'a, E> {
                 let mut left_1 = cs.alloc(|| "left_1", || {
                     left_1_val.ok_or(SynthesisError::AssignmentMissing)
                 })?;
+
+                cs.enforce(
+                    || " (1-leaf_side) * leaf",
+                    |lc| lc + one_minus_leaf_side,
+                    |lc| lc + prev_hash,
+                    |lc| lc + left_1
+                );
 
                 let mut left_2_val = match (leaf_side_val, proof_node_val) {
                     (Some(l), Some(p)) => {

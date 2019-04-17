@@ -20,17 +20,18 @@ pub fn are_equal_mut<E: Engine>(mut a: E::Fr, b: &E::Fr) -> bool {
     a.is_zero()
 }
 
-pub fn reduce_field_repr_to_elem<E: Engine>(mut elem_repr: <E::Fr as PrimeField>::Repr) -> E::Fr {
+pub fn reduce_field_repr_to_elem<E: Engine>(elem_repr: <E::Fr as PrimeField>::Repr) -> E::Fr {
     E::Fr::from_repr(reduce_field_repr::<E>(elem_repr)).unwrap()
 }
 
-pub fn reduce_field_repr<E: Engine>(mut elem_repr: <E::Fr as PrimeField>::Repr) -> <E::Fr as PrimeField>::Repr {
+pub fn reduce_field_repr<E: Engine>(elem_repr: <E::Fr as PrimeField>::Repr) -> <E::Fr as PrimeField>::Repr {
     let modulus = E::Fr::char();
 
-    while elem_repr >= modulus {
-        elem_repr.sub_noborrow(&modulus);
+    let mut r = elem_repr.clone();
+    while r >= modulus {
+        r.sub_noborrow(&modulus);
     }
-    elem_repr
+    r
 }
 
 
