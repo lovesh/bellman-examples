@@ -1,9 +1,9 @@
 #![allow(unused_imports)]
 #![allow(unused_variables)]
-extern crate bellman;
 extern crate pairing;
 extern crate rand;
 extern crate core;
+extern crate bellman;
 
 use bellman::{Circuit, ConstraintSystem, SynthesisError};
 use pairing::{Engine, Field, PrimeField};
@@ -11,8 +11,9 @@ use pairing::{Engine, Field, PrimeField};
 mod cube;
 mod multiply;
 mod testing_cs;
-mod sharkmimc;
+mod poseidon;
 mod mimc;
+mod difference;
 mod merkle_tree;
 use merkle_tree::vanilla_sparse_merkle_tree;
 
